@@ -134,26 +134,34 @@ const firebaseConfig = {
   gameCodeEl.textContent = gameId;
 
   // ================= 6. FIREBASE REFS =================
-  const gameRef     = db.ref('games/'+gameId);
-  const presenceRef = db.ref('games/'+gameId+'/presence/'+myId);
+// ================= 6. FIREBASE REFS =================
+const gameRef     = db.ref('games/'+gameId);
+const presenceRef = db.ref('games/'+gameId+'/presence/'+myId);
 
-  // Announce presence; remove on disconnect
+// 6a. Ensure game exists BEFORE writing presence.
+//     Use a transaction so we don't clobber an existing game.
+gameRef.transaction(current => {
+  if(current === null || !current.board){
+    return {
+      board: initialBoard(),
+      turn: 'w',
+      lastMove: null,
+      whitePlayer: null,
+      blackPlayer: null,
+      createdAt: Date.now()
+    };
+  }
+  // game already exists — leave it alone (returning undefined aborts the write)
+  return undefined;
+}, (err) => {
+  if(err){
+    console.error('transaction failed', err);
+    return;
+  }
+  // 6b. Now that the game node exists, announce presence
   presenceRef.onDisconnect().remove();
-  presenceRef.set({ ts: Date.now() });
-
-  // Create game if missing
-  gameRef.once('value').then(snap => {
-    if(!snap.exists() || !snap.val().board){
-      gameRef.set({
-        board: initialBoard(),
-        turn: 'w',
-        lastMove: null,
-        whitePlayer: null,
-        blackPlayer: null,
-        createdAt: Date.now()
-      });
-    }
-  });
+  presenceRef.set({ ts: Date.now(), color: null });
+});
 
   // ================= 7. LIVE GAME STATE =================
   gameRef.on('value', snap => {
@@ -384,16 +392,18 @@ const firebaseConfig = {
   });
 
   // ================= 14. NEW GAME =================
-  resetBtn.addEventListener('click',()=>{
-    if(!confirm('Start a new game? This ends the current one.')) return;
+resetBtn.addEventListener('click', () => {
+  if(!confirm('Start a new game? This ends the current one.')) return;
+  // remove our presence from the OLD game before navigating
+  presenceRef.remove().finally(() => {
     const newCode = makeCode();
-    gameRef.off();
     history.replaceState({},'',location.pathname+'?game='+newCode);
     location.reload();
   });
+});
 
   // ================= 15. CLEANUP =================
-  window.addEventListener('beforeunload',()=>{ presenceRef.remove(); });
+//  window.addEventListener('beforeunload',()=>{ presenceRef.remove(); });
 
   console.log('%cChess game id: '+gameId,'color:#f1c40f;font-weight:bold');
 })();
