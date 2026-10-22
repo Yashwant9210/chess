@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<meta name="theme-color" content="#2c3e50" />
+<title>2-Player Chess · PWA</title>
+<link rel="manifest" href='data:application/manifest+json,{"name":"2P Chess","short_name":"Chess","start_url":".","display":"standalone","orientation":"portrait","background_color":"#2c3e50","theme_color":"#2c3e50"}'>
+<style>
+  *{box-sizing:border-box;user-select:none;-webkit-tap-highlight-color:transparent;font-family:'Segoe UI',Roboto,system-ui,sans-serif}
+  body{margin:0;min-height:100vh;background:linear-gradient(145deg,#1e2a36,#2c3e50);display:flex;align-items:center;justify-content:center;padding:12px}
+  .game-container{max-width:540px;width:100%;background:#2c3e50;border-radius:32px;box-shadow:0 20px 40px rgba(0,0,0,.6);padding:20px 16px 24px;display:flex;flex-direction:column;align-items:center;border:1px solid #4a5f73}
+  h1{color:#ecf0f1;font-weight:400;font-size:1.6rem;margin:0 0 12px;letter-spacing:2px}
+  .link-panel{width:100%;background:#1e2a36;border-radius:48px;padding:12px 16px;margin-bottom:16px;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px}
+  .code-label{color:#95a5a6;font-size:.8rem;text-transform:uppercase;letter-spacing:1px}
+  .code-value{background:#0f1720;color:#f1c40f;padding:6px 14px;border-radius:24px;font-weight:700;font-size:1.2rem;letter-spacing:2px;font-family:monospace}
+  .copy-btn,.join-btn,.reset-btn{background:#3498db;border:none;color:#fff;font-weight:600;padding:8px 18px;border-radius:30px;font-size:.9rem;cursor:pointer;border:1px solid #5dade2}
+  .copy-btn:active,.join-btn:active,.reset-btn:active{transform:translateY(2px)}
+  .join-btn{background:#2ecc71;border-color:#58d68d}
+  .reset-btn{background:#e67e22;border-color:#f39c12}
+  .status-bar{width:100%;display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;color:#ecf0f1;font-size:.95rem;padding:0 8px}
+  .turn-indicator{background:#1e2a36;padding:6px 16px;border-radius:40px;display:flex;align-items:center;gap:8px}
+  .turn-dot{width:14px;height:14px;border-radius:50%;background:#bdc3c7;transition:.2s}
+  .turn-dot.white{background:#f5f5f5;box-shadow:0 0 10px #fff}
+  .turn-dot.black{background:#1a1a1a;box-shadow:0 0 8px #000,0 0 0 1px #aaa}
+  .player-role{font-size:.85rem;color:#f1c40f;background:#1e2a36;padding:6px 16px;border-radius:40px}
+  .board-wrapper{width:100%;aspect-ratio:1/1;background:#1e2a36;border-radius:24px;padding:8px;margin-bottom:8px}
+  .board{display:grid;grid-template-columns:repeat(8,1fr);grid-template-rows:repeat(8,1fr);width:100%;height:100%;border-radius:16px;overflow:hidden}
+  .square{display:flex;align-items:center;justify-content:center;font-size:clamp(1.7rem,8vw,3rem);line-height:1;cursor:pointer;position:relative;background:#f0d9b5;color:#1e1e1e}
+  .square.dark{background:#b58863}
+  .square.hint{background:#f1c40f!important;box-shadow:inset 0 0 0 3px #f39c12}
+  .square.kill-hint{background:#e74c3c!important;box-shadow:inset 0 0 0 3px #c0392b}
+  .square.selected{box-shadow:inset 0 0 0 4px #2ecc71}
+  .square.last-move{background:#aed6f1!important}
+  .square.dark.last-move{background:#5dade2!important}
+  .piece-white{color:#fff;text-shadow:0 0 4px #000,0 2px 4px #0008}
+  .piece-black{color:#111;text-shadow:0 0 4px #fff,0 1px 3px #fff9}
+  .footer-actions{display:flex;width:100%;justify-content:space-between;margin-top:12px;gap:12px}
+  .hidden{display:none!important}
+  .choice-overlay{display:flex;gap:20px;justify-content:center;margin-top:8px}
+  .color-choice{padding:12px 24px;border-radius:40px;font-weight:700;font-size:1.2rem;border:1px solid #bdc3c7;cursor:pointer;background:#ecf0f1;color:#1e2a36}
+  .color-choice.black-choice{background:#1e2a36;color:#ecf0f1;border-color:#4a5f73}
+  .waiting-msg{color:#f1c40f;padding:8px;text-align:center;font-size:.95rem}
+</style>
+</head>
+<body>
+<div class="game-container">
+  <h1>♔ 2‑PLAYER CHESS ♚</h1>
+
+  <div class="link-panel">
+    <div style="display:flex;align-items:center;gap:8px">
+      <span class="code-label">CODE</span>
+      <span class="code-value" id="gameCode">-----</span>
+    </div>
+    <button class="copy-btn" id="copyLinkBtn">🔗 Copy link</button>
+  </div>
+
+  <div class="status-bar">
+    <div class="turn-indicator"><span>Turn</span><span class="turn-dot" id="turnDot"></span></div>
+    <div class="player-role" id="playerRole">Not joined</div>
+  </div>
+
+  <div class="board-wrapper"><div class="board" id="board"></div></div>
+
+  <div id="choicePanel" class="choice-overlay hidden">
+    <button class="color-choice white-choice" data-color="w">♔ WHITE</button>
+    <button class="color-choice black-choice" data-color="b">♚ BLACK</button>
+  </div>
+  <div id="waitingMsg" class="waiting-msg">Waiting for opponent to join...</div>
+
+  <div class="footer-actions">
+    <button class="reset-btn" id="resetBtn">⟲ New Game</button>
+    <button class="join-btn" id="joinBtn" style="display:none">🤝 Join</button>
+  </div>
+</div>
+
+<!-- Firebase SDK (compat version – simplest) -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+
+<script>
+(function(){
+  // ================= 1. FIREBASE CONFIG (replace with yours) =================
+
+const firebaseConfig = {
+  apiKey: "AIzaSyAnhtIVehW_9aAxRYQUXeJfBqCruyW_VaI",
+  authDomain: "chess-67dac.firebaseapp.com",
+  databaseURL: "https://chess-67dac-default-rtdb.firebaseio.com",
+  projectId: "chess-67dac",
+  storageBucket: "chess-67dac.firebasestorage.app",
+  messagingSenderId: "626396674315",
+  appId: "1:626396674315:web:789a8017dffbac0e630a0e"
+};
+
+  firebase.initializeApp(firebaseConfig);
+  const db = firebase.database();
+
+  // ================= 2. STATE =================
+  let gameId = '';
+  let myColor = null;           // 'w' | 'b' | null
+  let myPlayerId = Math.random().toString(36).slice(2, 10); // unique tab id
+  let board = [];
+  let turn = 'w';
+  let selected = null;
+  let lastMove = null;
+  let bothPresent = false;
+  let gameRef = null;
+  let presenceRef = null;
+
+  // ================= 3. DOM =================
+  const boardEl = document.getElementById('board');
+  const gameCodeEl = document.getElementById('gameCode');
+  const copyBtn = document.getElementById('copyLinkBtn');
+  const turnDot = document.getElementById('turnDot');
+  const playerRoleEl = document.getElementById('playerRole');
+  const choicePanel = document.getElementById('choicePanel');
+  const waitingMsg = document.getElementById('waitingMsg');
+  const resetBtn = document.getElementById('resetBtn');
+  const joinBtn = document.getElementById('joinBtn');
+
+  // ================= 4. PIECES =================
+  const sym = {w:{k:'♔',q:'♕',r:'♖',b:'♗',n:'♘',p:'♙'},b:{k:'♚',q:'♛',r:'♜',b:'♝',n:'♞',p:'♟'}};
+
+  function initialBoard(){
+    const b = Array.from({length:8},()=>Array(8).fill(null));
+    const back = ['r','n','b','q','k','b','n','r'];
+    for(let c=0;c<8;c++){
+      b[0][c]={type:back[c],color:'b'};
+      b[1][c]={type:'p',color:'b'};
+      b[6][c]={type:'p',color:'w'};
+      b[7][c]={type:back[c],color:'w'};
+    }
+    return b;
+  }
+
+  // ================= 5. GAME ID FROM URL OR NEW =================
+  function makeCode(){return Math.random().toString(36).slice(2,8).toUpperCase();}
+  const urlGame = new URLSearchParams(location.search).get('game');
+  if(urlGame){
+    gameId = urlGame.toUpperCase();
+    history.replaceState({},'',location.pathname+'?game='+gameId);
+    joinBtn.style.display='none';
+  } else {
+    gameId = makeCode();
+    history.replaceState({},'',location.pathname+'?game='+gameId);
+    joinBtn.style.display='none'; // we're auto-creating; sharing link is the invite
+  }
+  gameCodeEl.textContent = gameId;
+
+  // ================= 6. ATTACH TO GAME IN FIREBASE =================
+  gameRef = db.ref('games/'+gameId);
+  presenceRef = db.ref('games/'+gameId+'/presence/'+myPlayerId);
+
+  // register presence
+  presenceRef.set({ts: Date.now(), color: null});
+  presenceRef.onDisconnect().remove();
+
+  // Load or create game
+  gameRef.once('value').then(snap => {
+    const data = snap.val();
+    if(!data || !data.board){
+      // creator: write initial state
+      gameRef.set({
+        board: initialBoard(),
+        turn: 'w',
+        lastMove: null,
+        whitePlayer: null,
+        blackPlayer: null,
+        createdAt: Date.now()
+      });
+    }
+  });
+
+  // Listen for game state changes
+  gameRef.on('value', snap => {
+    const data = snap.val();
+    if(!data) return;
+    board = data.board;
+    turn = data.turn;
+    lastMove = data.lastMove || null;
+
+    // determine my color from DB (someone may have claimed it)
+    const whiteId = data.whitePlayer;
+    const blackId = data.blackPlayer;
+
+    if(whiteId === myPlayerId) myColor = 'w';
+    else if(blackId === myPlayerId) myColor = 'b';
+    else myColor = null;
+
+    // both present?
+    bothPresent = !!(whiteId && blackId);
+
+    updateUI();
+  });
+
+  // Listen for presence changes
+  db.ref('games/'+gameId+'/presence').on('value', snap => {
+    const presences = snap.val() || {};
+    const count = Object.keys(presences).length;
+    if(!bothPresent){
+      waitingMsg.textContent = count < 2
+        ? `Waiting for opponent… (share the link)`
+        : `Waiting for colors to be chosen…`;
+    }
+  });
+
+  // ================= 7. COLOR CHOICE =================
+  choicePanel.addEventListener('click', e => {
+    const btn = e.target.closest('.color-choice');
+    if(!btn) return;
+    const chosen = btn.dataset.color;
+
+    gameRef.once('value').then(snap => {
+      const data = snap.val();
+      if(!data) return;
+      const whiteTaken = data.whitePlayer && data.whitePlayer !== myPlayerId;
+      const blackTaken = data.blackPlayer && data.blackPlayer !== myPlayerId;
+      if(chosen === 'w' && whiteTaken) return alert('White already taken');
+      if(chosen === 'b' && blackTaken) return alert('Black already taken');
+
+      const updates = {};
+      updates[chosen === 'w' ? 'whitePlayer' : 'blackPlayer'] = myPlayerId;
+      gameRef.update(updates);
+    });
+  });
+
+  // Show choice panel when both players present
+  function updateUI(){
+    updateBoard();
+    updateTurnDot();
+
+    const presences = gameRef.child('presence');
+    if(myColor){
+      playerRoleEl.textContent = myColor === 'w' ? 'You: White' : 'You: Black';
+      choicePanel.classList.add('hidden');
+    } else {
+      playerRoleEl.textContent = 'Choose a color';
+      if(bothPresent || (gameRef && true)) {
+        // show choice panel only if there's room
+        choicePanel.classList.remove('hidden');
+        waitingMsg.classList.add('hidden');
+      }
+    }
+
+    if(bothPresent){
+      waitingMsg.classList.add('hidden');
+    } else {
+      waitingMsg.classList.remove('hidden');
+      if(!myColor) choicePanel.classList.add('hidden');
+    }
+  }
+
+  // ================= 8. RENDER BOARD =================
+  function updateBoard(){
+    boardEl.innerHTML = '';
+    for(let r=0;r<8;r++){
+      for(let c=0;c<8;c++){
+        const sq = document.createElement('div');
+        sq.className = 'square' + (((r+c)%2)?' dark':'');
+        sq.dataset.row = r; sq.dataset.col = c;
+
+        if(lastMove){
+          if((lastMove.from.row===r&&lastMove.from.col===c)||(lastMove.to.row===r&&lastMove.to.col===c))
+            sq.classList.add('last-move');
+        }
+        if(selected && selected.row===r && selected.col===c) sq.classList.add('selected');
+
+        const p = board[r]?.[c];
+        if(p){
+          const s = document.createElement('span');
+          s.textContent = sym[p.color][p.type];
+          s.className = p.color==='w'?'piece-white':'piece-black';
+          sq.appendChild(s);
+        }
+        sq.addEventListener('click', () => onSquare(r,c));
+        boardEl.appendChild(sq);
+      }
+    }
+    if(selected && myColor===turn) showHints();
+  }
+
+  function showHints(){
+    if(!selected) return;
+    const moves = legalMoves(selected.row, selected.col);
+    const squares = boardEl.children;
+    for(const sq of squares){
+      const r = +sq.dataset.row, c = +sq.dataset.col;
+      if(moves.some(m=>m.row===r&&m.col===c)){
+        sq.classList.add(board[r][c] ? 'kill-hint' : 'hint');
+      }
+    }
+  }
+
+  // ================= 9. CLICK HANDLER (validation on both sides) =================
+  function onSquare(r,c){
+    if(!myColor){ return; }
+    if(!bothPresent){ alert('Waiting for opponent'); return; }
+    if(myColor !== turn){ return; } // not your turn
+
+    // No selection → select
+    if(!selected){
+      const p = board[r][c];
+      if(p && p.color === myColor){
+        selected = {row:r,col:c};
+        updateBoard();
+      }
+      return;
+    }
+
+    // clicking same square → deselect
+    if(selected.row===r && selected.col===c){
+      selected=null; updateBoard(); return;
+    }
+
+    // validate move
+    const moves = legalMoves(selected.row, selected.col);
+    const ok = moves.some(m=>m.row===r&&m.col===c);
+
+    if(ok){
+      // commit to Firebase (atomic-ish)
+      const newBoard = board.map(row=>row.slice());
+      newBoard[r][c] = newBoard[selected.row][selected.col];
+      newBoard[selected.row][selected.col] = null;
+
+      gameRef.once('value').then(snap => {
+        const cur = snap.val();
+        // Re-validate server state to prevent races
+        if(cur.turn !== turn) return;
+        const stillOk = legalMoves(selected.row, selected.col).some(m=>m.row===r&&m.col===c);
+        if(!stillOk) return;
+        gameRef.update({
+          board: newBoard,
+          turn: turn==='w'?'b':'w',
+          lastMove: {from:{row:selected.row,col:selected.col},to:{row:r,col:c}}
+        });
+        selected = null;
+      });
+    } else {
+      // maybe selecting another own piece
+      const p = board[r][c];
+      if(p && p.color===myColor){
+        selected={row:r,col:c};
+      } else {
+        selected=null;
+      }
+      updateBoard();
+    }
+  }
+
+  // ================= 10. LEGAL MOVES (same as before) =================
+  function legalMoves(row,col){
+    const piece = board[row][col];
+    if(!piece) return [];
+    const {type,color} = piece;
+    const opp = color==='w'?'b':'w';
+    const out = [];
+    const slide = (dr,dc)=>{
+      for(let i=1;i<8;i++){
+        const r=row+dr*i, c=col+dc*i;
+        if(r<0||r>7||c<0||c>7) break;
+        const t = board[r][c];
+        if(!t){ out.push({row:r,col:c}); }
+        else { if(t.color===opp) out.push({row:r,col:c}); break; }
+      }
+    };
+    const step = (r,c)=>{
+      if(r<0||r>7||c<0||c>7) return;
+      const t = board[r][c];
+      if(!t || t.color===opp) out.push({row:r,col:c});
+    };
+
+    if(type==='p'){
+      const dir = color==='w'?-1:1;
+      const start = color==='w'?6:1;
+      if(row+dir>=0&&row+dir<8&&!board[row+dir][col]){
+        out.push({row:row+dir,col});
+        if(row===start && !board[row+2*dir][col]) out.push({row:row+2*dir,col});
+      }
+      for(const dc of [-1,1]){
+        const nr=row+dir, nc=col+dc;
+        if(nr>=0&&nr<8&&nc>=0&&nc<8&&board[nr][nc]?.color===opp) out.push({row:nr,col:nc});
+      }
+    } else if(type==='n'){
+      for(const [dr,dc] of [[-2,-1],[-2,1],[-1,-2],[-1,2],[1,-2],[1,2],[2,-1],[2,1]]) step(row+dr,col+dc);
+    } else if(type==='b'){ slide(-1,-1);slide(-1,1);slide(1,-1);slide(1,1); }
+    else if(type==='r'){ slide(-1,0);slide(1,0);slide(0,-1);slide(0,1); }
+    else if(type==='q'){ slide(-1,-1);slide(-1,1);slide(1,-1);slide(1,1);slide(-1,0);slide(1,0);slide(0,-1);slide(0,1); }
+    else if(type==='k'){ for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++){if(dr||dc)step(row+dr,col+dc);} }
+    return out;
+  }
+
+  // ================= 11. TURN / STATUS =================
+  function updateTurnDot(){
+    turnDot.className='turn-dot '+(turn==='w'?'white':'black');
+  }
+
+  // ================= 12. COPY LINK =================
+  copyBtn.addEventListener('click',()=>{
+    const link = location.origin + location.pathname + '?game=' + gameId;
+    navigator.clipboard.writeText(link).then(()=>{
+      copyBtn.textContent='✅ Copied';
+      setTimeout(()=>copyBtn.textContent='🔗 Copy link',1500);
+    }).catch(()=>prompt('Copy this link:',link));
+  });
+
+  // ================= 13. RESET / NEW GAME =================
+  resetBtn.addEventListener('click',()=>{
+    if(!confirm('Start a new game? This ends the current one.')) return;
+    const newCode = makeCode();
+    gameRef.off();
+    history.replaceState({},'',location.pathname+'?game='+newCode);
+    location.reload();
+  });
+
+  // ================= 14. CLEANUP ON UNLOAD =================
+  window.addEventListener('beforeunload',()=>{
+    if(presenceRef) presenceRef.remove();
+  });
+
+  // ================= 15. LISTEN TO PRESENCE FOR COLOR ROOM =================
+  db.ref('games/'+gameId+'/presence').on('value', snap => {
+    const presences = snap.val() || {};
+    const count = Object.keys(presences).length;
+    if(count >= 2 && !myColor){
+      // Both players present, show color picker
+      choicePanel.classList.remove('hidden');
+      waitingMsg.classList.add('hidden');
+    }
+  });
+
+  console.log('%cChess game id: '+gameId,'color:#f1c40f;font-weight:bold');
+})();
+</script>
+</body>
+</html>
