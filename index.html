@@ -164,6 +164,7 @@ gameRef.transaction(current => {
 });
 
   // ================= 7. LIVE GAME STATE =================
+  // ================= 7. LIVE GAME STATE =================
   gameRef.on('value', snap => {
     const data = snap.val();
     if(!data) return;
@@ -177,10 +178,11 @@ gameRef.transaction(current => {
     else if(blackPlayerId === myId) myColor = 'b';
     else                            myColor = null;
 
-    // Clear a selection if it's no longer our turn / piece vanished
+    // Only clear selection if the piece literally vanished (opponent captured it)
+    // Do NOT clear it just because turn changed — the click handler manages that.
     if(selected){
       const p = board[selected.row]?.[selected.col];
-      if(!p || p.color !== myColor || turn !== myColor){
+      if(!p || p.color !== myColor){
         selected = null;
       }
     }
@@ -198,6 +200,9 @@ gameRef.transaction(current => {
   // Called by BOTH listeners. This is the fix — the UI is now
   // a pure function of (game state + presence count).
   function renderEverything(){
+      console.debug('[render]', { myColor, turn, presenceCount,
+      white: whitePlayerId?.slice(0,4), black: blackPlayerId?.slice(0,4),
+      selected, gameId });
     const bothPresent = presenceCount >= 2;
     const gameStarted = !!(whitePlayerId && blackPlayerId);
 
@@ -297,50 +302,88 @@ gameRef.transaction(current => {
   });
 
   // ================= 11. SQUARE CLICK =================
-  function onSquare(r,c){
-    if(!myColor) return;
-    if(!(whitePlayerId && blackPlayerId)) return;   // not started
-    if(myColor !== turn) return;                    // not your turn
-
+   // ================= 11. SQUARE CLICK (transactional) =================
+  function onSquare(r, c){
+    // Selection phase — no DB access, instant feedback
     if(!selected){
       const p = board[r][c];
-      if(p && p.color === myColor){ selected = {row:r,col:c}; renderEverything(); }
+      if(p && p.color === myColor){
+        selected = {row:r, col:c};
+        renderEverything();
+      }
       return;
     }
 
-    if(selected.row===r && selected.col===c){ selected=null; renderEverything(); return; }
-
-    const moves = legalMoves(selected.row, selected.col);
-    if(moves.some(m=>m.row===r&&m.col===c)){
-      // Build the new board locally
-      const newBoard = board.map(row => row.slice());
-      newBoard[r][c] = newBoard[selected.row][selected.col];
-      newBoard[selected.row][selected.col] = null;
-      const prevSel = selected;
+    // Clicking the same square deselects
+    if(selected.row === r && selected.col === c){
       selected = null;
-
-      // Commit only if the remote state is still what we expect
-      gameRef.once('value').then(snap => {
-        const cur = snap.val();
-        if(!cur || cur.turn !== turn) return;
-        // Re-validate with the actual current board
-        const ok = legalMovesOn(cur.board, prevSel.row, prevSel.col)
-                    .some(m=>m.row===r&&m.col===c);
-        if(!ok) return;
-        gameRef.update({
-          board: newBoard,
-          turn: turn === 'w' ? 'b' : 'w',
-          lastMove: { from:{row:prevSel.row,col:prevSel.col}, to:{row:r,col:c} }
-        });
-      });
-    } else {
-      const p = board[r][c];
-      if(p && p.color === myColor) selected = {row:r,col:c};
-      else selected = null;
       renderEverything();
+      return;
     }
-  }
 
+    // Clicking another of your own pieces → reselect
+    const targetPiece = board[r][c];
+    if(targetPiece && targetPiece.color === myColor){
+      selected = {row:r, col:c};
+      renderEverything();
+      return;
+    }
+
+    // Validate against local board for instant feedback
+    const moves = legalMoves(selected.row, selected.col);
+    if(!moves.some(m => m.row === r && m.col === c)){
+      selected = null;
+      renderEverything();
+      return;
+    }
+
+    const fromRow = selected.row, fromCol = selected.col;
+    selected = null;   // prevent double-commit on double-tap
+
+    // Commit atomically via transaction against fresh server state
+    gameRef.transaction(current => {
+      if(!current || !current.board) return current;       // game not ready
+      if(current.turn !== turn) return current;            // stale turn
+      if(current.whitePlayer !== whitePlayerId ||
+         current.blackPlayer !== blackPlayerId) return current; // slots changed
+
+      const freshMoves = legalMovesOn(current.board, fromRow, fromCol);
+      if(!freshMoves.some(m => m.row === r && m.col === c)) return current;
+
+      const newBoard = current.board.map(row => row.slice());
+      newBoard[r][c] = newBoard[fromRow][fromCol];
+      newBoard[fromRow][fromCol] = null;
+
+      return {
+        ...current,
+        board: newBoard,
+        turn: current.turn === 'w' ? 'b' : 'w',
+        lastMove: { from:{row:fromRow, col:fromCol}, to:{row:r, col:c} }
+      };
+    }, (err, committed) => {
+      if(err){
+        console.error('Move failed:', err);
+        alert('Move failed: ' + err.message);
+        return;
+      }
+      if(!committed){
+        // Aborted — log why for debugging
+        gameRef.once('value').then(snap => {
+          const d = snap.val();
+          if(!d) return;
+          if(d.turn !== turn){
+            console.warn('Move rejected: not your turn (stale)');
+          } else if(!legalMovesOn(d.board, fromRow, fromCol)
+                      .some(m => m.row === r && m.col === c)){
+            console.warn('Move rejected: illegal on fresh board');
+          } else {
+            console.warn('Move rejected: unknown reason');
+          }
+        });
+      }
+      // On success, the gameRef.on('value') listener re-renders everyone.
+    });
+  }
   // ================= 12. LEGAL MOVES =================
   function legalMoves(row,col){ return legalMovesOn(board,row,col); }
   function legalMovesOn(bd,row,col){
