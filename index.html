@@ -204,6 +204,10 @@ gameRef.transaction(current => {
       white: whitePlayerId?.slice(0,4), black: blackPlayerId?.slice(0,4),
       selected, gameId });
     const bothPresent = presenceCount >= 2;
+       // If the board hasn't arrived yet, still render the empty grid + status
+    if(!Array.isArray(board) || board.length !== 8){
+      board = Array.from({length:8}, () => Array(8).fill(null));
+    }
     const gameStarted = !!(whitePlayerId && blackPlayerId);
 
     // --- status text ---
@@ -273,7 +277,9 @@ gameRef.transaction(current => {
     }
 
     // hints
-    if(selected && myColor === turn){
+    // hints — only when we have a real board and a real selection
+    // hints — only when we have a real board and a real selection
+    if(selected && myColor === turn && board.length === 8 && board[selected.row]){
       const moves = legalMoves(selected.row, selected.col);
       for(const sq of boardEl.children){
         const r = +sq.dataset.row, c = +sq.dataset.col;
@@ -282,7 +288,6 @@ gameRef.transaction(current => {
         }
       }
     }
-  }
 
   // ================= 10. COLOR CHOICE =================
   choicePanel.addEventListener('click', e => {
@@ -387,7 +392,8 @@ gameRef.transaction(current => {
   // ================= 12. LEGAL MOVES =================
   function legalMoves(row,col){ return legalMovesOn(board,row,col); }
   function legalMovesOn(bd,row,col){
-    const piece = bd[row]?.[col];
+    if(!bd || !Array.isArray(bd) || !bd[row]) return [];
+    const piece = bd[row][col];
     if(!piece) return [];
     const {type,color} = piece;
     const opp = color==='w'?'b':'w';
