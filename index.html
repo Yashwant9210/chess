@@ -200,6 +200,20 @@ gameRef.transaction(current => {
   // Called by BOTH listeners. This is the fix — the UI is now
   // a pure function of (game state + presence count).
   function renderEverything(){
+       if(!Array.isArray(board) || board.length !== 8){
+      // Board hasn't loaded yet — render empty squares and status only
+      boardEl.innerHTML = '';
+      for(let r = 0; r < 8; r++){
+        for(let c = 0; c < 8; c++){
+          const sq = document.createElement('div');
+          sq.className = 'square' + (((r+c)%2) ? ' dark' : '');
+          sq.dataset.row = r; sq.dataset.col = c;
+          sq.addEventListener('click', () => onSquare(r, c));
+          boardEl.appendChild(sq);
+        }
+      }
+      return;
+    }
       console.debug('[render]', { myColor, turn, presenceCount,
       white: whitePlayerId?.slice(0,4), black: blackPlayerId?.slice(0,4),
       selected, gameId });
@@ -367,70 +381,75 @@ gameRef.transaction(current => {
       };
     }, (err, committed) => {
       if(err){
-        console.error('Move failed:', err);
+        console.error('[tx] error', err);
         alert('Move failed: ' + err.message);
         return;
       }
-      if(!committed){
-        // Aborted — log why for debugging
-        gameRef.once('value').then(snap => {
-          const d = snap.val();
-          if(!d) return;
-          if(d.turn !== turn){
-            console.warn('Move rejected: not your turn (stale)');
-          } else if(!legalMovesOn(d.board, fromRow, fromCol)
-                      .some(m => m.row === r && m.col === c)){
-            console.warn('Move rejected: illegal on fresh board');
-          } else {
-            console.warn('Move rejected: unknown reason');
-          }
-        });
+       if(!committed){
+        console.warn('[tx] NOT committed');
+      } else {
+        console.debug('[tx] committed ✓');
+        renderEverything();
+      }
+    });
       }
       // On success, the gameRef.on('value') listener re-renders everyone.
     });
   }
   // ================= 12. LEGAL MOVES =================
-  function legalMoves(row,col){ return legalMovesOn(board,row,col); }
-  function legalMovesOn(bd,row,col){
-    if(!bd || !Array.isArray(bd) || !bd[row]) return [];
-    const piece = bd[row][col];
-    if(!piece) return [];
-    const {type,color} = piece;
-    const opp = color==='w'?'b':'w';
-    const out = [];
-    const slide = (dr,dc)=>{
-      for(let i=1;i<8;i++){
-        const r=row+dr*i, c=col+dc*i;
-        if(r<0||r>7||c<0||c>7) break;
-        const t = bd[r][c];
-        if(!t) out.push({row:r,col:c});
-        else { if(t.color===opp) out.push({row:r,col:c}); break; }
-      }
-    };
-    const step = (r,c)=>{
-      if(r<0||r>7||c<0||c>7) return;
-      const t = bd[r][c];
-      if(!t || t.color===opp) out.push({row:r,col:c});
-    };
-    if(type==='p'){
-      const dir = color==='w'?-1:1, start = color==='w'?6:1;
-      if(row+dir>=0&&row+dir<8&&!bd[row+dir][col]){
-        out.push({row:row+dir,col});
-        if(row===start && !bd[row+2*dir][col]) out.push({row:row+2*dir,col});
-      }
-      for(const dc of [-1,1]){
-        const nr=row+dir, nc=col+dc;
-        if(nr>=0&&nr<8&&nc>=0&&nc<8&&bd[nr][nc]?.color===opp) out.push({row:nr,col:nc});
-      }
-    } else if(type==='n'){
-      for(const [dr,dc] of [[-2,-1],[-2,1],[-1,-2],[-1,2],[1,-2],[1,2],[2,-1],[2,1]]) step(row+dr,col+dc);
-    } else if(type==='b'){ slide(-1,-1);slide(-1,1);slide(1,-1);slide(1,1); }
-    else if(type==='r'){ slide(-1,0);slide(1,0);slide(0,-1);slide(0,1); }
-    else if(type==='q'){ slide(-1,-1);slide(-1,1);slide(1,-1);slide(1,1);slide(-1,0);slide(1,0);slide(0,-1);slide(0,1); }
-    else if(type==='k'){ for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++){if(dr||dc)step(row+dr,col+dc);} }
-    return out;
+    // ================= 12. LEGAL MOVES =================
+  function legalMoves(row, col){
+    return legalMovesOn(board, row, col);
   }
 
+  function legalMovesOn(bd, row, col){
+    if(!bd || !Array.isArray(bd) || bd.length !== 8) return [];
+    if(row < 0 || row > 7 || col < 0 || col > 7) return [];
+    if(!bd[row] || !bd[row][col]) return [];
+    const piece = bd[row][col];
+    if(!piece || !piece.type || !piece.color) return [];
+    const {type, color} = piece;
+    const opp = color === 'w' ? 'b' : 'w';
+    const out = [];
+    const slide = (dr, dc) => {
+      for(let i = 1; i < 8; i++){
+        const r = row + dr * i, c = col + dc * i;
+        if(r < 0 || r > 7 || c < 0 || c > 7) break;
+        if(!bd[r]) break;
+        const t = bd[r][c];
+        if(!t) out.push({row:r, col:c});
+        else { if(t.color === opp) out.push({row:r, col:c}); break; }
+      }
+    };
+    const step = (r, c) => {
+      if(r < 0 || r > 7 || c < 0 || c > 7) return;
+      if(!bd[r]) return;
+      const t = bd[r][c];
+      if(!t || t.color === opp) out.push({row:r, col:c});
+    };
+    if(type === 'p'){
+      const dir = color === 'w' ? -1 : 1;
+      const start = color === 'w' ? 6 : 1;
+      if(bd[row + dir] && !bd[row + dir][col]){
+        out.push({row:row + dir, col});
+        if(row === start && bd[row + 2*dir] && !bd[row + 2*dir][col]){
+          out.push({row:row + 2*dir, col});
+        }
+      }
+      for(const dc of [-1, 1]){
+        const nr = row + dir, nc = col + dc;
+        if(nr >= 0 && nr < 8 && nc >= 0 && nc < 8 && bd[nr] && bd[nr][nc] && bd[nr][nc].color === opp){
+          out.push({row:nr, col:nc});
+        }
+      }
+    } else if(type === 'n'){
+      for(const [dr, dc] of [[-2,-1],[-2,1],[-1,-2],[-1,2],[1,-2],[1,2],[2,-1],[2,1]]) step(row+dr, col+dc);
+    } else if(type === 'b'){ slide(-1,-1); slide(-1,1); slide(1,-1); slide(1,1); }
+    else if(type === 'r'){ slide(-1,0); slide(1,0); slide(0,-1); slide(0,1); }
+    else if(type === 'q'){ slide(-1,-1); slide(-1,1); slide(1,-1); slide(1,1); slide(-1,0); slide(1,0); slide(0,-1); slide(0,1); }
+    else if(type === 'k'){ for(let dr = -1; dr <= 1; dr++) for(let dc = -1; dc <= 1; dc++){ if(dr || dc) step(row+dr, col+dc); } }
+    return out;
+  }
   // ================= 13. COPY LINK =================
   copyBtn.addEventListener('click',()=>{
     const link = location.origin + location.pathname + '?game=' + gameId;
