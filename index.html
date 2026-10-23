@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
- <meta charset="UTF-8" />
+<meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
 <meta name="theme-color" content="#2c3e50" />
 <title>2-Player Chess · PWA</title>
@@ -78,7 +78,9 @@
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 <script>
 (function(){
-  // ================= 1. FIREBASE CONFIG =================
+  // ===================================================================
+  // 1. FIREBASE CONFIG — REPLACE WITH YOUR OWN PROJECT VALUES
+  // ===================================================================
 const firebaseConfig = {
   apiKey: "AIzaSyAnhtIVehW_9aAxRYQUXeJfBqCruyW_VaI",
   authDomain: "chess-67dac.firebaseapp.com",
@@ -91,85 +93,98 @@ const firebaseConfig = {
 
   firebase.initializeApp(firebaseConfig);
   const db = firebase.database();
-
-  // ================= 2. STATE =================
-  const myId = Math.random().toString(36).slice(2,10);
+//============================================================
+  // 2. STATE
+  // ===================================================================
+  const myId = Math.random().toString(36).slice(2, 10);  // per-tab unique id
   let gameId = '';
-  let myColor = null;
-  let board = [];
-  let turn = 'w';
-  let selected = null;
-  let lastMove = null;
+  let myColor = null;                 // 'w' | 'b' | null
+  let board = [];                     // 8x8 array of {type,color} | null
+  let turn = 'w';                     // 'w' | 'b'
+  let selected = null;                // {row, col} | null
+  let lastMove = null;                // {from:{row,col}, to:{row,col}} | null
   let presenceCount = 0;
   let whitePlayerId = null;
   let blackPlayerId = null;
 
-  // ================= 3. DOM =================
+  // ===================================================================
+  // 3. DOM
+  // ===================================================================
   const $ = id => document.getElementById(id);
-  const boardEl = $('board'), gameCodeEl = $('gameCode'), copyBtn = $('copyLinkBtn'),
-        turnDot = $('turnDot'), playerRoleEl = $('playerRole'),
-        choicePanel = $('choicePanel'), waitingMsg = $('waitingMsg'),
-        startBanner = $('startBanner'), resetBtn = $('resetBtn');
+  const boardEl = $('board');
+  const gameCodeEl = $('gameCode');
+  const copyBtn = $('copyLinkBtn');
+  const turnDot = $('turnDot');
+  const playerRoleEl = $('playerRole');
+  const choicePanel = $('choicePanel');
+  const waitingMsg = $('waitingMsg');
+  const startBanner = $('startBanner');
+  const resetBtn = $('resetBtn');
 
-  // ================= 4. PIECES =================
-  const sym = {w:{k:'♔',q:'♕',r:'♖',b:'♗',n:'♘',p:'♙'},b:{k:'♚',q:'♛',r:'♜',b:'♝',n:'♞',p:'♟'}};
+  // ===================================================================
+  // 4. PIECE SYMBOLS & INITIAL BOARD
+  // ===================================================================
+  const sym = {
+    w: { k:'♔', q:'♕', r:'♖', b:'♗', n:'♘', p:'♙' },
+    b: { k:'♚', q:'♛', r:'♜', b:'♝', n:'♞', p:'♟' }
+  };
 
   function initialBoard(){
-    const b = Array.from({length:8},()=>Array(8).fill(null));
+    const b = Array.from({length:8}, () => Array(8).fill(null));
     const back = ['r','n','b','q','k','b','n','r'];
-    for(let c=0;c<8;c++){
-      b[0][c]={type:back[c],color:'b'};
-      b[1][c]={type:'p',color:'b'};
-      b[6][c]={type:'p',color:'w'};
-      b[7][c]={type:back[c],color:'w'};
+    for(let c = 0; c < 8; c++){
+      b[0][c] = { type: back[c], color: 'b' };
+      b[1][c] = { type: 'p',     color: 'b' };
+      b[6][c] = { type: 'p',     color: 'w' };
+      b[7][c] = { type: back[c], color: 'w' };
     }
     return b;
   }
 
-  // ================= 5. GAME ID =================
-  function makeCode(){return Math.random().toString(36).slice(2,8).toUpperCase();}
+  // ===================================================================
+  // 5. GAME ID FROM URL (or generate new)
+  // ===================================================================
+  function makeCode(){ return Math.random().toString(36).slice(2, 8).toUpperCase(); }
   const urlGame = new URLSearchParams(location.search).get('game');
   gameId = urlGame ? urlGame.toUpperCase() : makeCode();
-  history.replaceState({},'',location.pathname+'?game='+gameId);
+  history.replaceState({}, '', location.pathname + '?game=' + gameId);
   gameCodeEl.textContent = gameId;
 
-  // ================= 6. FIREBASE REFS =================
-// ================= 6. FIREBASE REFS =================
-const gameRef     = db.ref('games/'+gameId);
-const presenceRef = db.ref('games/'+gameId+'/presence/'+myId);
+  // ===================================================================
+  // 6. FIREBASE REFERENCES
+  // ===================================================================
+  const gameRef = db.ref('games/' + gameId);
+  const presenceRef = db.ref('games/' + gameId + '/presence/' + myId);
 
-// 6a. Ensure game exists BEFORE writing presence.
-//     Use a transaction so we don't clobber an existing game.
-gameRef.transaction(current => {
-  if(current === null || !current.board){
-    return {
-      board: initialBoard(),
-      turn: 'w',
-      lastMove: null,
-      whitePlayer: null,
-      blackPlayer: null,
-      createdAt: Date.now()
-    };
-  }
-  // game already exists — leave it alone (returning undefined aborts the write)
-  return undefined;
-}, (err) => {
-  if(err){
-    console.error('transaction failed', err);
-    return;
-  }
-  // 6b. Now that the game node exists, announce presence
-  presenceRef.onDisconnect().remove();
-  presenceRef.set({ ts: Date.now(), color: null });
-});
+  // Ensure game exists BEFORE writing presence. Transaction never overwrites.
+  gameRef.transaction(current => {
+    if(current === null || !current.board){
+      return {
+        board: initialBoard(),
+        turn: 'w',
+        lastMove: null,
+        whitePlayer: null,
+        blackPlayer: null,
+        createdAt: Date.now()
+      };
+    }
+    return undefined;   // abort — already exists, don't clobber
+  }, err => {
+    if(err){ console.error('game init transaction failed', err); return; }
+    // Now that the game node exists, announce presence and clean up on disconnect
+    presenceRef.onDisconnect().remove();
+    presenceRef.set({ ts: Date.now() });
+  });
 
-  // ================= 7. LIVE GAME STATE =================
-  // ================= 7. LIVE GAME STATE =================
+  // ===================================================================
+  // 7. LIVE GAME STATE LISTENER
+  // ===================================================================
   gameRef.on('value', snap => {
     const data = snap.val();
     if(!data) return;
-    board     = data.board;
-    turn      = data.turn;
+
+    board     = data.board || [];
+    turn      = data.turn || 'w';
     lastMove  = data.lastMove || null;
     whitePlayerId = data.whitePlayer || null;
     blackPlayerId = data.blackPlayer || null;
@@ -178,53 +193,53 @@ gameRef.transaction(current => {
     else if(blackPlayerId === myId) myColor = 'b';
     else                            myColor = null;
 
-    // Only clear selection if the piece literally vanished (opponent captured it)
-    // Do NOT clear it just because turn changed — the click handler manages that.
+    // Only drop the selection if the piece no longer exists or belongs to the opponent
     if(selected){
       const p = board[selected.row]?.[selected.col];
-      if(!p || p.color !== myColor){
-        selected = null;
-      }
+      if(!p || p.color !== myColor) selected = null;
     }
 
     renderEverything();
   });
 
-  // ================= 8. LIVE PRESENCE COUNT =================
-  db.ref('games/'+gameId+'/presence').on('value', snap => {
+  // ===================================================================
+  // 8. LIVE PRESENCE COUNT
+  // ===================================================================
+  db.ref('games/' + gameId + '/presence').on('value', snap => {
     presenceCount = snap.exists() ? Object.keys(snap.val()).length : 0;
     renderEverything();
   });
 
-  // ================= 9. MASTER RENDER =================
-  // Called by BOTH listeners. This is the fix — the UI is now
-  // a pure function of (game state + presence count).
+  // ===================================================================
+  // 9. MASTER RENDER — pure function of (board, turn, myColor, presenceCount)
+  // ===================================================================
   function renderEverything(){
-       if(!Array.isArray(board) || board.length !== 8){
-      // Board hasn't loaded yet — render empty squares and status only
+    // Defensive: board not yet loaded
+    if(!Array.isArray(board) || board.length !== 8){
       boardEl.innerHTML = '';
       for(let r = 0; r < 8; r++){
         for(let c = 0; c < 8; c++){
           const sq = document.createElement('div');
-          sq.className = 'square' + (((r+c)%2) ? ' dark' : '');
+          sq.className = 'square' + (((r + c) % 2) ? ' dark' : '');
           sq.dataset.row = r; sq.dataset.col = c;
           sq.addEventListener('click', () => onSquare(r, c));
           boardEl.appendChild(sq);
         }
       }
+      // Still show waiting state
+      if(presenceCount < 2){
+        waitingMsg.classList.remove('hidden');
+        waitingMsg.textContent = 'Connecting…';
+        choicePanel.classList.add('hidden');
+        startBanner.classList.add('hidden');
+      }
       return;
     }
-      console.debug('[render]', { myColor, turn, presenceCount,
-      white: whitePlayerId?.slice(0,4), black: blackPlayerId?.slice(0,4),
-      selected, gameId });
+
     const bothPresent = presenceCount >= 2;
-       // If the board hasn't arrived yet, still render the empty grid + status
-    if(!Array.isArray(board) || board.length !== 8){
-      board = Array.from({length:8}, () => Array(8).fill(null));
-    }
     const gameStarted = !!(whitePlayerId && blackPlayerId);
 
-    // --- status text ---
+    // --- Player role text ---
     if(myColor){
       playerRoleEl.textContent = myColor === 'w' ? 'You: White' : 'You: Black';
     } else if(presenceCount < 2){
@@ -233,7 +248,7 @@ gameRef.transaction(current => {
       playerRoleEl.textContent = 'Pick a color';
     }
 
-    // --- waiting / choice / banner ---
+    // --- Waiting / choice / start banner ---
     if(presenceCount < 2){
       waitingMsg.classList.remove('hidden');
       waitingMsg.textContent = 'Waiting for opponent to join… (share the link)';
@@ -243,11 +258,11 @@ gameRef.transaction(current => {
       waitingMsg.classList.add('hidden');
       choicePanel.classList.remove('hidden');
       startBanner.classList.add('hidden');
-      // Disable a color button if already claimed by the other player
+      // Disable taken colors
       choicePanel.querySelectorAll('.color-choice').forEach(btn => {
         const c = btn.dataset.color;
-        const taken = (c === 'w' && whitePlayerId && whitePlayerId !== myId)
-                   || (c === 'b' && blackPlayerId && blackPlayerId !== myId);
+        const taken = (c === 'w' && whitePlayerId && whitePlayerId !== myId) ||
+                      (c === 'b' && blackPlayerId && blackPlayerId !== myId);
         btn.disabled = !!taken;
         btn.style.opacity = taken ? 0.35 : 1;
       });
@@ -260,50 +275,59 @@ gameRef.transaction(current => {
         : 'Game started — spectator';
     }
 
-    // --- turn dot ---
+    // --- Turn dot ---
     turnDot.className = 'turn-dot ' + (turn === 'w' ? 'white' : 'black');
 
-    // --- board ---
+    // --- Board squares ---
     boardEl.innerHTML = '';
-    for(let r=0;r<8;r++){
-      for(let c=0;c<8;c++){
+    for(let r = 0; r < 8; r++){
+      for(let c = 0; c < 8; c++){
         const sq = document.createElement('div');
-        sq.className = 'square' + (((r+c)%2) ? ' dark' : '');
+        sq.className = 'square' + (((r + c) % 2) ? ' dark' : '');
         sq.dataset.row = r; sq.dataset.col = c;
 
+        // Highlight last move
         if(lastMove){
-          if((lastMove.from.row===r&&lastMove.from.col===c) ||
-             (lastMove.to.row===r&&lastMove.to.col===c))
+          if((lastMove.from.row === r && lastMove.from.col === c) ||
+             (lastMove.to.row === r && lastMove.to.col === c)){
             sq.classList.add('last-move');
+          }
         }
-        if(selected && selected.row===r && selected.col===c) sq.classList.add('selected');
 
-        const p = board[r]?.[c];
-        if(p){
-          const s = document.createElement('span');
-          s.textContent = sym[p.color][p.type];
-          s.className = p.color==='w' ? 'piece-white' : 'piece-black';
-          sq.appendChild(s);
+        // Highlight selection
+        if(selected && selected.row === r && selected.col === c){
+          sq.classList.add('selected');
         }
-        sq.addEventListener('click', () => onSquare(r,c));
+
+        // Draw piece
+        const p = board[r]?.[c];
+        if(p && p.type && p.color && sym[p.color]?.[p.type]){
+          const span = document.createElement('span');
+          span.textContent = sym[p.color][p.type];
+          span.className = p.color === 'w' ? 'piece-white' : 'piece-black';
+          sq.appendChild(span);
+        }
+
+        sq.addEventListener('click', () => onSquare(r, c));
         boardEl.appendChild(sq);
       }
     }
 
-    // hints
-    // hints — only when we have a real board and a real selection
-    // hints — only when we have a real board and a real selection
+    // --- Highlight legal move hints (yellow) & captures (red) ---
     if(selected && myColor === turn && board.length === 8 && board[selected.row]){
       const moves = legalMoves(selected.row, selected.col);
       for(const sq of boardEl.children){
         const r = +sq.dataset.row, c = +sq.dataset.col;
-        if(moves.some(m=>m.row===r&&m.col===c)){
+        if(moves.some(m => m.row === r && m.col === c)){
           sq.classList.add(board[r][c] ? 'kill-hint' : 'hint');
         }
       }
     }
+  }
 
-  // ================= 10. COLOR CHOICE =================
+  // ===================================================================
+  // 10. COLOR CHOICE
+  // ===================================================================
   choicePanel.addEventListener('click', e => {
     const btn = e.target.closest('.color-choice');
     if(!btn || btn.disabled) return;
@@ -314,41 +338,46 @@ gameRef.transaction(current => {
       if(!data) return;
       if(chosen === 'w' && data.whitePlayer && data.whitePlayer !== myId) return;
       if(chosen === 'b' && data.blackPlayer && data.blackPlayer !== myId) return;
+
       const updates = {};
       updates[chosen === 'w' ? 'whitePlayer' : 'blackPlayer'] = myId;
       gameRef.update(updates);
     });
   });
 
-  // ================= 11. SQUARE CLICK =================
-   // ================= 11. SQUARE CLICK (transactional) =================
+  // ===================================================================
+  // 11. SQUARE CLICK — selection + transactional move commit
+  // ===================================================================
   function onSquare(r, c){
-    // Selection phase — no DB access, instant feedback
+    // Guard: board not loaded yet
+    if(!Array.isArray(board) || board.length !== 8) return;
+
+    // --- Selection phase (no DB access) ---
     if(!selected){
       const p = board[r][c];
       if(p && p.color === myColor){
-        selected = {row:r, col:c};
+        selected = { row: r, col: c };
         renderEverything();
       }
       return;
     }
 
-    // Clicking the same square deselects
+    // Deselect on same square
     if(selected.row === r && selected.col === c){
       selected = null;
       renderEverything();
       return;
     }
 
-    // Clicking another of your own pieces → reselect
+    // Reselect if clicking another own piece
     const targetPiece = board[r][c];
     if(targetPiece && targetPiece.color === myColor){
-      selected = {row:r, col:c};
+      selected = { row: r, col: c };
       renderEverything();
       return;
     }
 
-    // Validate against local board for instant feedback
+    // Validate against local board for instant UI response
     const moves = legalMoves(selected.row, selected.col);
     if(!moves.some(m => m.row === r && m.col === c)){
       selected = null;
@@ -357,18 +386,33 @@ gameRef.transaction(current => {
     }
 
     const fromRow = selected.row, fromCol = selected.col;
-    selected = null;   // prevent double-commit on double-tap
+    selected = null;   // prevent double-commit
 
-    // Commit atomically via transaction against fresh server state
+    // --- Commit via atomic transaction ---
     gameRef.transaction(current => {
-      if(!current || !current.board) return current;       // game not ready
-      if(current.turn !== turn) return current;            // stale turn
-      if(current.whitePlayer !== whitePlayerId ||
-         current.blackPlayer !== blackPlayerId) return current; // slots changed
+      if(!current || !current.board) return current;
 
+      // Determine our slot from the DB (authoritative)
+      const weAreWhite = current.whitePlayer === myId;
+      const weAreBlack = current.blackPlayer === myId;
+      if(!weAreWhite && !weAreBlack) return current;
+
+      // Our turn?
+      const ourTurn = (weAreWhite && current.turn === 'w') ||
+                      (weAreBlack && current.turn === 'b');
+      if(!ourTurn) return current;
+
+      // From square has our piece?
+      const fromPiece = current.board[fromRow]?.[fromCol];
+      if(!fromPiece) return current;
+      const expectedColor = weAreWhite ? 'w' : 'b';
+      if(fromPiece.color !== expectedColor) return current;
+
+      // Is destination legal on the fresh board?
       const freshMoves = legalMovesOn(current.board, fromRow, fromCol);
       if(!freshMoves.some(m => m.row === r && m.col === c)) return current;
 
+      // Build new board
       const newBoard = current.board.map(row => row.slice());
       newBoard[r][c] = newBoard[fromRow][fromCol];
       newBoard[fromRow][fromCol] = null;
@@ -377,27 +421,26 @@ gameRef.transaction(current => {
         ...current,
         board: newBoard,
         turn: current.turn === 'w' ? 'b' : 'w',
-        lastMove: { from:{row:fromRow, col:fromCol}, to:{row:r, col:c} }
+        lastMove: { from: { row: fromRow, col: fromCol }, to: { row: r, col: c } }
       };
     }, (err, committed) => {
       if(err){
-        console.error('[tx] error', err);
+        console.error('Move failed:', err);
         alert('Move failed: ' + err.message);
         return;
       }
-       if(!committed){
-        console.warn('[tx] NOT committed');
+      if(!committed){
+        console.warn('Move rejected — state changed');
       } else {
-        console.debug('[tx] committed ✓');
+        // Ensure UI refreshes even if the on('value') snapshot is slow
         renderEverything();
       }
     });
-      }
-      // On success, the gameRef.on('value') listener re-renders everyone.
-    });
   }
-  // ================= 12. LEGAL MOVES =================
-    // ================= 12. LEGAL MOVES =================
+
+  // ===================================================================
+  // 12. LEGAL MOVES (hardened — never throws)
+  // ===================================================================
   function legalMoves(row, col){
     return legalMovesOn(board, row, col);
   }
@@ -406,74 +449,104 @@ gameRef.transaction(current => {
     if(!bd || !Array.isArray(bd) || bd.length !== 8) return [];
     if(row < 0 || row > 7 || col < 0 || col > 7) return [];
     if(!bd[row] || !bd[row][col]) return [];
+
     const piece = bd[row][col];
     if(!piece || !piece.type || !piece.color) return [];
-    const {type, color} = piece;
+
+    const { type, color } = piece;
     const opp = color === 'w' ? 'b' : 'w';
     const out = [];
+
     const slide = (dr, dc) => {
       for(let i = 1; i < 8; i++){
         const r = row + dr * i, c = col + dc * i;
         if(r < 0 || r > 7 || c < 0 || c > 7) break;
         if(!bd[r]) break;
         const t = bd[r][c];
-        if(!t) out.push({row:r, col:c});
-        else { if(t.color === opp) out.push({row:r, col:c}); break; }
+        if(!t) out.push({ row: r, col: c });
+        else {
+          if(t.color === opp) out.push({ row: r, col: c });
+          break;
+        }
       }
     };
+
     const step = (r, c) => {
       if(r < 0 || r > 7 || c < 0 || c > 7) return;
       if(!bd[r]) return;
       const t = bd[r][c];
-      if(!t || t.color === opp) out.push({row:r, col:c});
+      if(!t || t.color === opp) out.push({ row: r, col: c });
     };
+
     if(type === 'p'){
       const dir = color === 'w' ? -1 : 1;
       const start = color === 'w' ? 6 : 1;
       if(bd[row + dir] && !bd[row + dir][col]){
-        out.push({row:row + dir, col});
-        if(row === start && bd[row + 2*dir] && !bd[row + 2*dir][col]){
-          out.push({row:row + 2*dir, col});
+        out.push({ row: row + dir, col });
+        if(row === start && bd[row + 2 * dir] && !bd[row + 2 * dir][col]){
+          out.push({ row: row + 2 * dir, col });
         }
       }
       for(const dc of [-1, 1]){
         const nr = row + dir, nc = col + dc;
-        if(nr >= 0 && nr < 8 && nc >= 0 && nc < 8 && bd[nr] && bd[nr][nc] && bd[nr][nc].color === opp){
-          out.push({row:nr, col:nc});
+        if(nr >= 0 && nr < 8 && nc >= 0 && nc < 8 &&
+           bd[nr] && bd[nr][nc] && bd[nr][nc].color === opp){
+          out.push({ row: nr, col: nc });
         }
       }
     } else if(type === 'n'){
-      for(const [dr, dc] of [[-2,-1],[-2,1],[-1,-2],[-1,2],[1,-2],[1,2],[2,-1],[2,1]]) step(row+dr, col+dc);
-    } else if(type === 'b'){ slide(-1,-1); slide(-1,1); slide(1,-1); slide(1,1); }
-    else if(type === 'r'){ slide(-1,0); slide(1,0); slide(0,-1); slide(0,1); }
-    else if(type === 'q'){ slide(-1,-1); slide(-1,1); slide(1,-1); slide(1,1); slide(-1,0); slide(1,0); slide(0,-1); slide(0,1); }
-    else if(type === 'k'){ for(let dr = -1; dr <= 1; dr++) for(let dc = -1; dc <= 1; dc++){ if(dr || dc) step(row+dr, col+dc); } }
+      for(const [dr, dc] of [[-2,-1],[-2,1],[-1,-2],[-1,2],[1,-2],[1,2],[2,-1],[2,1]]){
+        step(row + dr, col + dc);
+      }
+    } else if(type === 'b'){
+      slide(-1,-1); slide(-1,1); slide(1,-1); slide(1,1);
+    } else if(type === 'r'){
+      slide(-1,0); slide(1,0); slide(0,-1); slide(0,1);
+    } else if(type === 'q'){
+      slide(-1,-1); slide(-1,1); slide(1,-1); slide(1,1);
+      slide(-1,0); slide(1,0); slide(0,-1); slide(0,1);
+    } else if(type === 'k'){
+      for(let dr = -1; dr <= 1; dr++){
+        for(let dc = -1; dc <= 1; dc++){
+          if(dr || dc) step(row + dr, col + dc);
+        }
+      }
+    }
     return out;
   }
-  // ================= 13. COPY LINK =================
-  copyBtn.addEventListener('click',()=>{
+
+  // ===================================================================
+  // 13. COPY SHARE LINK
+  // ===================================================================
+  copyBtn.addEventListener('click', () => {
     const link = location.origin + location.pathname + '?game=' + gameId;
-    navigator.clipboard.writeText(link).then(()=>{
-      copyBtn.textContent='✅ Copied';
-      setTimeout(()=>copyBtn.textContent='🔗 Copy link',1500);
-    }).catch(()=>prompt('Copy this link:',link));
+    navigator.clipboard.writeText(link).then(() => {
+      copyBtn.textContent = '✅ Copied';
+      setTimeout(() => copyBtn.textContent = '🔗 Copy link', 1500);
+    }).catch(() => prompt('Copy this link:', link));
   });
 
-  // ================= 14. NEW GAME =================
-resetBtn.addEventListener('click', () => {
-  if(!confirm('Start a new game? This ends the current one.')) return;
-  // remove our presence from the OLD game before navigating
-  presenceRef.remove().finally(() => {
-    const newCode = makeCode();
-    history.replaceState({},'',location.pathname+'?game='+newCode);
-    location.reload();
+  // ===================================================================
+  // 14. NEW GAME
+  // ===================================================================
+  resetBtn.addEventListener('click', () => {
+    if(!confirm('Start a new game? This ends the current one.')) return;
+    presenceRef.remove().finally(() => {
+      const newCode = makeCode();
+      history.replaceState({}, '', location.pathname + '?game=' + newCode);
+      location.reload();
+    });
   });
-});
 
-  // ================= 15. CLEANUP =================
-//  window.addEventListener('beforeunload',()=>{ presenceRef.remove(); });
+  // ===================================================================
+  // 15. CLEANUP ON PAGE UNLOAD
+  // ===================================================================
+  window.addEventListener('beforeunload', () => {
+    // onDisconnect already handles this, but be explicit
+    presenceRef.remove();
+  });
 
-  console.log('%cChess game id: '+gameId,'color:#f1c40f;font-weight:bold');
+  console.log('%cChess game id: ' + gameId, 'color:#f1c40f;font-weight:bold');
 })();
 </script>
 </body>
