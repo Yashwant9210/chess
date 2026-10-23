@@ -78,6 +78,7 @@
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 <script>
 (function(){
+  
   // ===================================================================
   // 1. FIREBASE CONFIG — REPLACE WITH YOUR OWN PROJECT VALUES
   // ===================================================================
@@ -96,13 +97,13 @@ const firebaseConfig = {
 //============================================================
   // 2. STATE
   // ===================================================================
-  const myId = Math.random().toString(36).slice(2, 10);  // per-tab unique id
+  const myId = Math.random().toString(36).slice(2, 10);
   let gameId = '';
-  let myColor = null;                 // 'w' | 'b' | null
-  let board = [];                     // 8x8 array of {type,color} | null
-  let turn = 'w';                     // 'w' | 'b'
-  let selected = null;                // {row, col} | null
-  let lastMove = null;                // {from:{row,col}, to:{row,col}} | null
+  let myColor = null;
+  let board = [];
+  let turn = 'w';
+  let selected = null;
+  let lastMove = null;
   let presenceCount = 0;
   let whitePlayerId = null;
   let blackPlayerId = null;
@@ -141,6 +142,21 @@ const firebaseConfig = {
     return b;
   }
 
+  // **CRITICAL FIX**: Normalize any Firebase board (array or object) into 8x8 array
+  function normalizeBoard(raw){
+    if(!raw) return Array.from({length:8}, () => Array(8).fill(null));
+    const b = Array.from({length:8}, () => Array(8).fill(null));
+    for(let r = 0; r < 8; r++){
+      for(let c = 0; c < 8; c++){
+        const cell = raw[r]?.[c];
+        if(cell && cell.type && cell.color){
+          b[r][c] = { type: cell.type, color: cell.color };
+        }
+      }
+    }
+    return b;
+  }
+
   // ===================================================================
   // 5. GAME ID FROM URL (or generate new)
   // ===================================================================
@@ -156,7 +172,7 @@ const firebaseConfig = {
   const gameRef = db.ref('games/' + gameId);
   const presenceRef = db.ref('games/' + gameId + '/presence/' + myId);
 
-  // Ensure game exists BEFORE writing presence. Transaction never overwrites.
+  // Ensure game exists BEFORE writing presence
   gameRef.transaction(current => {
     if(current === null || !current.board){
       return {
@@ -168,10 +184,9 @@ const firebaseConfig = {
         createdAt: Date.now()
       };
     }
-    return undefined;   // abort — already exists, don't clobber
+    return undefined;   // abort — already exists
   }, err => {
     if(err){ console.error('game init transaction failed', err); return; }
-    // Now that the game node exists, announce presence and clean up on disconnect
     presenceRef.onDisconnect().remove();
     presenceRef.set({ ts: Date.now() });
   });
@@ -183,7 +198,8 @@ const firebaseConfig = {
     const data = snap.val();
     if(!data) return;
 
-    board     = data.board || [];
+    // **CRITICAL FIX**: normalize board from Firebase's object shape to proper array
+    board     = normalizeBoard(data.board);
     turn      = data.turn || 'w';
     lastMove  = data.lastMove || null;
     whitePlayerId = data.whitePlayer || null;
@@ -193,7 +209,6 @@ const firebaseConfig = {
     else if(blackPlayerId === myId) myColor = 'b';
     else                            myColor = null;
 
-    // Only drop the selection if the piece no longer exists or belongs to the opponent
     if(selected){
       const p = board[selected.row]?.[selected.col];
       if(!p || p.color !== myColor) selected = null;
@@ -211,10 +226,9 @@ const firebaseConfig = {
   });
 
   // ===================================================================
-  // 9. MASTER RENDER — pure function of (board, turn, myColor, presenceCount)
+  // 9. MASTER RENDER
   // ===================================================================
   function renderEverything(){
-    // Defensive: board not yet loaded
     if(!Array.isArray(board) || board.length !== 8){
       boardEl.innerHTML = '';
       for(let r = 0; r < 8; r++){
@@ -226,7 +240,6 @@ const firebaseConfig = {
           boardEl.appendChild(sq);
         }
       }
-      // Still show waiting state
       if(presenceCount < 2){
         waitingMsg.classList.remove('hidden');
         waitingMsg.textContent = 'Connecting…';
@@ -239,7 +252,6 @@ const firebaseConfig = {
     const bothPresent = presenceCount >= 2;
     const gameStarted = !!(whitePlayerId && blackPlayerId);
 
-    // --- Player role text ---
     if(myColor){
       playerRoleEl.textContent = myColor === 'w' ? 'You: White' : 'You: Black';
     } else if(presenceCount < 2){
@@ -248,7 +260,6 @@ const firebaseConfig = {
       playerRoleEl.textContent = 'Pick a color';
     }
 
-    // --- Waiting / choice / start banner ---
     if(presenceCount < 2){
       waitingMsg.classList.remove('hidden');
       waitingMsg.textContent = 'Waiting for opponent to join… (share the link)';
@@ -258,7 +269,6 @@ const firebaseConfig = {
       waitingMsg.classList.add('hidden');
       choicePanel.classList.remove('hidden');
       startBanner.classList.add('hidden');
-      // Disable taken colors
       choicePanel.querySelectorAll('.color-choice').forEach(btn => {
         const c = btn.dataset.color;
         const taken = (c === 'w' && whitePlayerId && whitePlayerId !== myId) ||
@@ -275,10 +285,8 @@ const firebaseConfig = {
         : 'Game started — spectator';
     }
 
-    // --- Turn dot ---
     turnDot.className = 'turn-dot ' + (turn === 'w' ? 'white' : 'black');
 
-    // --- Board squares ---
     boardEl.innerHTML = '';
     for(let r = 0; r < 8; r++){
       for(let c = 0; c < 8; c++){
@@ -286,7 +294,6 @@ const firebaseConfig = {
         sq.className = 'square' + (((r + c) % 2) ? ' dark' : '');
         sq.dataset.row = r; sq.dataset.col = c;
 
-        // Highlight last move
         if(lastMove){
           if((lastMove.from.row === r && lastMove.from.col === c) ||
              (lastMove.to.row === r && lastMove.to.col === c)){
@@ -294,12 +301,10 @@ const firebaseConfig = {
           }
         }
 
-        // Highlight selection
         if(selected && selected.row === r && selected.col === c){
           sq.classList.add('selected');
         }
 
-        // Draw piece
         const p = board[r]?.[c];
         if(p && p.type && p.color && sym[p.color]?.[p.type]){
           const span = document.createElement('span');
@@ -313,9 +318,11 @@ const firebaseConfig = {
       }
     }
 
-    // --- Highlight legal move hints (yellow) & captures (red) ---
-    if(selected && myColor === turn && board.length === 8 && board[selected.row]){
+    // --- Highlight legal move hints ---
+    if(selected && board.length === 8 &&
+       board[selected.row] && board[selected.row][selected.col]){
       const moves = legalMoves(selected.row, selected.col);
+      console.log('[hints]', { selected, moves, myColor, turn, piece: board[selected.row][selected.col] });
       for(const sq of boardEl.children){
         const r = +sq.dataset.row, c = +sq.dataset.col;
         if(moves.some(m => m.row === r && m.col === c)){
@@ -346,13 +353,11 @@ const firebaseConfig = {
   });
 
   // ===================================================================
-  // 11. SQUARE CLICK — selection + transactional move commit
+  // 11. SQUARE CLICK
   // ===================================================================
   function onSquare(r, c){
-    // Guard: board not loaded yet
     if(!Array.isArray(board) || board.length !== 8) return;
 
-    // --- Selection phase (no DB access) ---
     if(!selected){
       const p = board[r][c];
       if(p && p.color === myColor){
@@ -362,14 +367,12 @@ const firebaseConfig = {
       return;
     }
 
-    // Deselect on same square
     if(selected.row === r && selected.col === c){
       selected = null;
       renderEverything();
       return;
     }
 
-    // Reselect if clicking another own piece
     const targetPiece = board[r][c];
     if(targetPiece && targetPiece.color === myColor){
       selected = { row: r, col: c };
@@ -377,7 +380,6 @@ const firebaseConfig = {
       return;
     }
 
-    // Validate against local board for instant UI response
     const moves = legalMoves(selected.row, selected.col);
     if(!moves.some(m => m.row === r && m.col === c)){
       selected = null;
@@ -386,34 +388,32 @@ const firebaseConfig = {
     }
 
     const fromRow = selected.row, fromCol = selected.col;
-    selected = null;   // prevent double-commit
+    selected = null;
 
     // --- Commit via atomic transaction ---
     gameRef.transaction(current => {
       if(!current || !current.board) return current;
 
-      // Determine our slot from the DB (authoritative)
+      // Normalize fresh board from DB
+      const dbBoard = normalizeBoard(current.board);
+
       const weAreWhite = current.whitePlayer === myId;
       const weAreBlack = current.blackPlayer === myId;
       if(!weAreWhite && !weAreBlack) return current;
 
-      // Our turn?
       const ourTurn = (weAreWhite && current.turn === 'w') ||
                       (weAreBlack && current.turn === 'b');
       if(!ourTurn) return current;
 
-      // From square has our piece?
-      const fromPiece = current.board[fromRow]?.[fromCol];
+      const fromPiece = dbBoard[fromRow]?.[fromCol];
       if(!fromPiece) return current;
       const expectedColor = weAreWhite ? 'w' : 'b';
       if(fromPiece.color !== expectedColor) return current;
 
-      // Is destination legal on the fresh board?
-      const freshMoves = legalMovesOn(current.board, fromRow, fromCol);
+      const freshMoves = legalMovesOn(dbBoard, fromRow, fromCol);
       if(!freshMoves.some(m => m.row === r && m.col === c)) return current;
 
-      // Build new board
-      const newBoard = current.board.map(row => row.slice());
+      const newBoard = dbBoard.map(row => row.slice());
       newBoard[r][c] = newBoard[fromRow][fromCol];
       newBoard[fromRow][fromCol] = null;
 
@@ -432,14 +432,13 @@ const firebaseConfig = {
       if(!committed){
         console.warn('Move rejected — state changed');
       } else {
-        // Ensure UI refreshes even if the on('value') snapshot is slow
         renderEverything();
       }
     });
   }
 
   // ===================================================================
-  // 12. LEGAL MOVES (hardened — never throws)
+  // 12. LEGAL MOVES (hardened)
   // ===================================================================
   function legalMoves(row, col){
     return legalMovesOn(board, row, col);
@@ -542,7 +541,6 @@ const firebaseConfig = {
   // 15. CLEANUP ON PAGE UNLOAD
   // ===================================================================
   window.addEventListener('beforeunload', () => {
-    // onDisconnect already handles this, but be explicit
     presenceRef.remove();
   });
 
